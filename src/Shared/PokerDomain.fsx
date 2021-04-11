@@ -1,7 +1,6 @@
 ﻿// 5 cards -> Poker hand
 
 open System
-open Microsoft.FSharp.Reflection
 
 [<CustomComparison; StructuralEquality>]
 type Suit =
@@ -54,6 +53,7 @@ let aceOfHearts = { Suit = Hearts; Value = Ace }
 let fiveOfHearts = { Suit = Hearts; Value = Five }
 let fourOfDiamonds = { Suit = Diamonds ; Value = Four }
 let jackOfDiamonds = { Suit = Diamonds ; Value = Jack }
+let jackOfHearts = { Suit = Hearts ; Value = Jack }
 let queenOfDiamonds = { Suit = Diamonds ; Value = Queen }
 let twoOfSpades = { Suit = Spades; Value = Two }
 let threeOfSpades = { Suit = Spades; Value = Three }
@@ -61,7 +61,9 @@ let sixOfSpades = { Suit = Spades; Value = Six }
 let kingOfSpades = { Suit = Spades; Value = King }
 let nineOfSpades = { Suit = Spades; Value = Nine }
 let tenOfSpades = { Suit = Spades; Value = Ten }
-let kindOfDiamonds = { Suit = Diamonds; Value = King }
+let kingOfDiamonds = { Suit = Diamonds; Value = King }
+let kingOfHearts = { Suit = Hearts; Value = King }
+let kingOfClubs = { Suit = Clubs; Value = King }
 
 [<RequireQualifiedAccess>]
 module FiveCards =
@@ -116,6 +118,47 @@ module FiveCards =
           tenOfSpades ]
         |> FiveCards
 
+    let fourOfAKind =
+        [ jackOfDiamonds
+          kingOfClubs
+          kingOfSpades
+          kingOfHearts
+          kingOfDiamonds ]
+        |> FiveCards
+
+    let fullHouse =
+        [ jackOfDiamonds
+          jackOfHearts
+          kingOfSpades
+          kingOfHearts
+          kingOfDiamonds ]
+        |> FiveCards
+
+    let twoPair =
+        [ jackOfDiamonds
+          jackOfHearts
+          kingOfSpades
+          kingOfHearts
+          aceOfHearts ]
+        |> FiveCards
+
+    let pair =
+        [ jackOfDiamonds
+          nineOfSpades
+          kingOfSpades
+          kingOfHearts
+          aceOfHearts ]
+        |> FiveCards
+
+    let threeOfAKind =
+        [ jackOfDiamonds
+          twoOfSpades
+          kingOfSpades
+          kingOfHearts
+          kingOfDiamonds ]
+        |> FiveCards
+
+
 type SortedCards = SortedCards of Card list
 type SortedFiveCards = SortedFiveCards of Card list
 type SuitedFiveCards = SuitedFiveCards of Card list
@@ -136,21 +179,21 @@ type PokerHand =
     | Flush of SuitedFiveCards
     | FullHouse of FullHouse
     | FourOfAKind of FourOfAKind
-    | StraightFlush of SortedSuitedFiveCards
-    | RoyalFlush of SortedSuitedFiveCards
+    | StraightFlush
+    | RoyalFlush
 
 type PokerHandSolver = FiveCards.FiveCards -> PokerHand
 
-let (|Suited|_|) (FiveCards.FiveCards cards) =
+let isFlush cards=
     let suits =
         cards
         |> List.map (fun card -> card.Suit)
 
-    let allSuited =
-        suits
-        |> List.forall ((=) (suits |> List.head))
+    suits
+    |> List.forall ((=) (suits |> List.head))
 
-    if allSuited then
+let (|Suited|_|) (FiveCards.FiveCards cards) =
+    if isFlush cards then
         Suited Some cards
     else
         Suited None
@@ -158,7 +201,7 @@ let (|Suited|_|) (FiveCards.FiveCards cards) =
 let (|Sorted|) cards =
     Sorted List.sortDescending cards
 
-let isStraight cards =
+let isStraight (FiveCards.FiveCards (Sorted cards)) =
     let rec inner cards =
         match cards with
         | first::second::tail ->
@@ -181,9 +224,9 @@ let isStraight cards =
         |> List.map CardValue.getIntValue
         |> inner
 
-let (|Straight|_|) (Sorted cards) =
-    if isStraight cards then
-        Straight Some cards
+let (|Straight|_|) fiveCards =
+    if isStraight fiveCards then
+        Straight Some fiveCards
     else
         Straight None
 
@@ -198,29 +241,138 @@ let isBroadway (Sorted (cards: Card list)) =
     | [ Ace; King; Queen; Jack; Ten ] -> true
     | _ -> false
 
-let (|Broadway|_|) (Sorted (cards: Card list)) =
+let (|Broadway|_|) (FiveCards.FiveCards (Sorted (cards: Card list))) =
     if isBroadway cards then
         Broadway Some ()
     else
         None
 
-[ FiveCards.testData |> function FiveCards.FiveCards cards -> not <| isStraight cards
+type Occurrences = Occurrences of (CardValue * int) list
+let getOccurrences (FiveCards.FiveCards (Sorted cards)): Occurrences  =
+    cards
+    |> List.map (fun c -> c.Value)
+    |> List.countBy id
+    |> List.sortByDescending snd
+    |> Occurrences
 
-  FiveCards.straightCards |> function FiveCards.FiveCards cards -> isStraight cards
+let getKickers (Occurrences occurrences) =
+    occurrences
+    |> List.filter (snd >> (=) 1)
+    |> List.map fst
+    |> List.sortByDescending CardValue.getIntValue
+
+let (|IsFourOfAKind|_|) (Occurrences occurrences as wrapped) =
+    occurrences
+    |> List.head
+    |> fun (value, number) ->
+        if number = 4 then
+            IsFourOfAKind Some (value, getKickers wrapped)
+        else IsFourOfAKind None
+
+let (|IsFullHouse|_|) (Occurrences occurrences) =
+    match occurrences with
+    | [ (topSetValue,3); (bottomSetValue,2) ] -> IsFullHouse Some (topSetValue, bottomSetValue)
+    | _ -> IsFullHouse None
+
+let (|IsThreeOfAKind|_|) (Occurrences occurrences as wrapped) =
+    match occurrences with
+    | (setValue,3)::_ -> IsThreeOfAKind Some (setValue, getKickers wrapped)
+    | _ -> IsThreeOfAKind None
+
+let (|IsTwoPair|_|) (Occurrences occurrences) =
+    match occurrences with
+    | [ (topSetValue,2); (bottomSetValue,2); (kicker,1) ] -> IsTwoPair Some (topSetValue, bottomSetValue, kicker)
+    | _ -> IsTwoPair None
+
+let (|IsPair|_|) (Occurrences occurrences as wrapped) =
+    match occurrences with
+    | (pairValue,2)::tail when tail |> List.map snd = [1;1;1] -> IsPair Some (pairValue, getKickers wrapped)
+    | _ -> IsPair None
+
+let (|IsHighCard|_|) (Occurrences occurrences as wrapped) =
+    match occurrences with
+    | x when x |> List.map snd = [1;1;1;1;1] -> IsHighCard Some (getKickers wrapped)
+    | _ -> IsHighCard None
+
+let isHighCard fiveCards =
+    let occurrences = getOccurrences fiveCards
+
+    match occurrences with
+    | IsHighCard _ -> true
+    | _ -> false
+
+let isPair fiveCards =
+    let occurrences = getOccurrences fiveCards
+
+    match occurrences with
+    | IsPair _ -> true
+    | _ -> false
+
+let isTwoPair fiveCards =
+    let occurrences = getOccurrences fiveCards
+
+    match occurrences with
+    | IsTwoPair _ -> true
+    | _ -> false
+
+let isThreeOfAKind fiveCards =
+    let occurrences = getOccurrences fiveCards
+
+    match occurrences with
+    | IsThreeOfAKind _ -> true
+    | _ -> false
+
+let isFullHouse fiveCards =
+    let occurrences = getOccurrences fiveCards
+
+    match occurrences with
+    | IsFullHouse _ -> true
+    | _ -> false
+
+let isFourOfAKind fiveCards =
+    let occurrences = getOccurrences fiveCards
+
+    match occurrences with
+    | IsFourOfAKind _ -> true
+    | _ -> false
+
+[ isStraight FiveCards.straightCards
+  not <| isStraight FiveCards.testData
+  isStraight FiveCards.wheelStraightCards
+
   FiveCards.straightCards |> function FiveCards.FiveCards cards -> not <| isBroadway cards
   FiveCards.broadwayCards |> function FiveCards.FiveCards cards -> isBroadway cards
 
-  FiveCards.wheelStraightCards |> function FiveCards.FiveCards cards -> isStraight cards ]
+  FiveCards.testData |> function FiveCards.FiveCards cards -> not <| isFlush cards
+  FiveCards.suitedCards |> function FiveCards.FiveCards cards -> isFlush cards
 
+  FiveCards.testData |> isFullHouse |> not
+  FiveCards.fullHouse |> isFullHouse
 
+  FiveCards.testData |> isThreeOfAKind |> not
+  FiveCards.threeOfAKind |> isThreeOfAKind
+
+  FiveCards.fullHouse |> isTwoPair |> not
+  FiveCards.twoPair |> isTwoPair
+
+  FiveCards.twoPair |> isPair |> not
+  FiveCards.pair |> isPair
+
+  FiveCards.pair |> isHighCard |> not
+  FiveCards.testData |> isHighCard
+
+  FiveCards.testData |> isFourOfAKind |> not
+  FiveCards.fourOfAKind |> isFourOfAKind ]
 
 //let isSuited cards =
 //    match cards with
 //    | Suited _ -> true
 //    | _ -> false
 //
-//isSuited FiveCards.testData
-//isSuited FiveCards.suitedCards
+//
 
 //let solver: PokerHandSolver =
 //    fun cards ->
+//        match cards with
+//        | Broadway _ & Suited _ -> RoyalFlush
+//        | Straight _ & Suited _ -> StraightFlush
