@@ -50,11 +50,14 @@ module CardValue =
 type Card = { Suit: Suit; Value: CardValue }
 
 let aceOfHearts = { Suit = Hearts; Value = Ace }
+let aceOfSpades = { Suit = Spades; Value = Ace }
 let fiveOfHearts = { Suit = Hearts; Value = Five }
 let fourOfDiamonds = { Suit = Diamonds ; Value = Four }
 let jackOfDiamonds = { Suit = Diamonds ; Value = Jack }
 let jackOfHearts = { Suit = Hearts ; Value = Jack }
+let jackOfSpades = { Suit = Spades ; Value = Jack }
 let queenOfDiamonds = { Suit = Diamonds ; Value = Queen }
+let queenOfSpades = { Suit = Spades ; Value = Queen }
 let twoOfSpades = { Suit = Spades; Value = Two }
 let threeOfSpades = { Suit = Spades; Value = Three }
 let sixOfSpades = { Suit = Spades; Value = Six }
@@ -118,6 +121,30 @@ module FiveCards =
           tenOfSpades ]
         |> FiveCards
 
+    let royalFlushCards =
+        [ jackOfSpades
+          queenOfSpades
+          kingOfSpades
+          aceOfSpades
+          tenOfSpades ]
+        |> FiveCards
+
+    let straightFlushCards =
+        [ jackOfSpades
+          queenOfSpades
+          kingOfSpades
+          tenOfSpades
+          nineOfSpades ]
+        |> FiveCards
+
+    let flushCards =
+        [ jackOfSpades
+          queenOfSpades
+          kingOfSpades
+          twoOfSpades
+          nineOfSpades ]
+        |> FiveCards
+
     let fourOfAKind =
         [ jackOfDiamonds
           kingOfClubs
@@ -165,38 +192,35 @@ type SuitedFiveCards = SuitedFiveCards of Card list
 
 type Pair = { Value: CardValue; Kickers: SortedCards }
 type TwoPair = { HighestValue: CardValue; LowestValue: CardValue; Kicker: CardValue }
-type ThreeOfAKind = { Value: CardValue; Kickers: SortedCards }
-type FullHouse = { ThreeOfAKind: CardValue; Pair: CardValue }
-type FourOfAKind = { Value: CardValue; Kicker: CardValue }
 type SortedSuitedFiveCards = SortedSuitedFiveCards of Card list
 
 type PokerHand =
-    | HighCard of SortedFiveCards
-    | Pair of Pair
-    | TwoPair of TwoPair
-    | ThreeOfAKind of ThreeOfAKind
-    | Straight of SortedFiveCards
-    | Flush of SuitedFiveCards
-    | FullHouse of FullHouse
-    | FourOfAKind of FourOfAKind
+    | HighCard of CardValue list
+    | Pair of pair: CardValue * kickers: CardValue list
+    | TwoPair of top: CardValue * bottom: CardValue * kicker: CardValue
+    | ThreeOfAKind of set: CardValue * kickers: CardValue list
+    | Straight of CardValue list
+    | Flush of Suit * CardValue list
+    | FullHouse of top:CardValue * bottom: CardValue
+    | FourOfAKind of CardValue
     | StraightFlush
     | RoyalFlush
 
 type PokerHandSolver = FiveCards.FiveCards -> PokerHand
 
-let isFlush cards=
-    let suits =
+let tryFlush cards =
+    let suitsByCount =
         cards
-        |> List.map (fun card -> card.Suit)
+        |> List.countBy (fun card -> card.Suit)
 
-    suits
-    |> List.forall ((=) (suits |> List.head))
+    match suitsByCount with
+    | [(suit,5)] -> Some suit
+    | _ -> None
+
+let isFlush = tryFlush >> Option.isSome
 
 let (|Suited|_|) (FiveCards.FiveCards cards) =
-    if isFlush cards then
-        Suited Some cards
-    else
-        Suited None
+    Suited (tryFlush cards)
 
 let (|Sorted|) cards =
     Sorted List.sortDescending cards
@@ -371,8 +395,59 @@ let isFourOfAKind fiveCards =
 //
 //
 
-//let solver: PokerHandSolver =
-//    fun cards ->
-//        match cards with
-//        | Broadway _ & Suited _ -> RoyalFlush
-//        | Straight _ & Suited _ -> StraightFlush
+let solve: PokerHandSolver =
+    fun cards ->
+        let occurrences = getOccurrences cards
+        match cards,occurrences with
+        | Broadway _ & Suited _,_ -> RoyalFlush
+        | Straight _ & Suited _,_ -> StraightFlush
+        | _,IsFourOfAKind (card, _) -> FourOfAKind card
+        | _,IsFullHouse (top, bottom) -> FullHouse (top, bottom)
+
+        | Suited suit & FiveCards.FiveCards (Sorted cards), _ ->
+            let cardValues = cards |> List.map (fun c -> c.Value)
+            Flush (suit, cardValues)
+
+        | Straight _ & FiveCards.FiveCards (Sorted cards),_ ->
+            let cardValues = cards |> List.map (fun c -> c.Value)
+            Straight cardValues
+        | _, IsThreeOfAKind (set, kickers) -> ThreeOfAKind (set, kickers)
+        | _, IsTwoPair (top, bot, kicker) -> TwoPair (top, bot, kicker)
+        | _, IsPair (pair, kickers) -> Pair (pair, kickers)
+        | _, IsHighCard cards -> HighCard cards
+        | _ -> failwithf "Literally impossible, unless bug hehe"
+
+[
+    (FiveCards.royalFlushCards,(=), RoyalFlush)
+    (FiveCards.broadwayCards,(<>), RoyalFlush)
+
+    (FiveCards.royalFlushCards,(<>), StraightFlush)
+    (FiveCards.straightCards,(<>), StraightFlush)
+    (FiveCards.straightFlushCards,(=), StraightFlush)
+
+    (FiveCards.fourOfAKind,(=), FourOfAKind King)
+
+    (FiveCards.fullHouse,(=), FullHouse (King,Jack))
+
+    (FiveCards.royalFlushCards,(<>), Flush (Spades, [Ace; King; Queen; Jack; Ten]))
+    (FiveCards.straightFlushCards,(<>), Flush (Spades, [King; Queen; Jack; Ten; Nine]))
+    (FiveCards.flushCards,(=), Flush (Spades, [King; Queen; Jack; Nine; Two]))
+
+    (FiveCards.royalFlushCards,(<>), Straight [Ace; King; Queen; Jack; Ten])
+    (FiveCards.straightFlushCards,(<>), Straight [King; Queen; Jack; Ten; Nine])
+    (FiveCards.straightCards,(=), Straight [Six; Five; Four; Three; Two])
+    (FiveCards.wheelStraightCards,(=), Straight [Ace; Five; Four; Three; Two])
+
+    (FiveCards.fullHouse,(<>), ThreeOfAKind (King, [ Jack; Jack ]))
+    (FiveCards.threeOfAKind,(=), ThreeOfAKind (King, [ Jack; Two ]))
+
+    (FiveCards.fullHouse,(<>), TwoPair (King, Jack, Jack))
+    (FiveCards.twoPair,(=), TwoPair (King, Jack, Ace))
+
+    (FiveCards.twoPair,(<>), Pair (King, [Ace; Jack; Jack]))
+    (FiveCards.pair,(=), Pair (King, [Ace; Jack; Nine]))
+
+    (FiveCards.testData,(=), HighCard [Ace; King; Six; Three; Two])
+
+]
+|> List.map (fun (actual,equalOrNo,expected) -> solve actual |> equalOrNo expected )
