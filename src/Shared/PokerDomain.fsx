@@ -185,15 +185,6 @@ module FiveCards =
           kingOfDiamonds ]
         |> FiveCards
 
-
-type SortedCards = SortedCards of Card list
-type SortedFiveCards = SortedFiveCards of Card list
-type SuitedFiveCards = SuitedFiveCards of Card list
-
-type Pair = { Value: CardValue; Kickers: SortedCards }
-type TwoPair = { HighestValue: CardValue; LowestValue: CardValue; Kicker: CardValue }
-type SortedSuitedFiveCards = SortedSuitedFiveCards of Card list
-
 type PokerHand =
     | HighCard of CardValue list
     | Pair of pair: CardValue * kickers: CardValue list
@@ -451,3 +442,28 @@ let solve: PokerHandSolver =
 
 ]
 |> List.map (fun (actual,equalOrNo,expected) -> solve actual |> equalOrNo expected )
+
+type HandResult =
+    | Left of PokerHand
+    | Right of PokerHand
+    | Split
+
+type PokerHandComparer = PokerHand -> PokerHand -> HandResult
+
+let compareHands: PokerHandComparer =
+    fun left right ->
+        if left = right then
+            Split
+        elif left > right then
+            Left left
+        else
+            Right right
+
+
+compareHands RoyalFlush StraightFlush = Left RoyalFlush
+compareHands RoyalFlush RoyalFlush = Split
+compareHands StraightFlush RoyalFlush = Right RoyalFlush
+
+(Pair (King, [Ace; Jack; Nine]),Pair (King, [Ace; Jack; Seven]))
+||> compareHands
+|> (=) (Left <| Pair (King, [Ace; Jack; Nine]))
